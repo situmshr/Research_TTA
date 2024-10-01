@@ -46,17 +46,6 @@ def get_entropy(x: torch.Tensor) -> torch.Tensor:
     x = -(x.softmax(1) * x.log_softmax(1)).sum(1)
     return x
 
-# number of caling entropy
-log_count = 0
-def get_entropy_logger(x: torch.Tensor):
-    logs_path = "logs"
-    os.makedirs(logs_path, exist_ok=True)
-    global log_count
-    log_count += 1
-    logger = get_logger(f"Entropy_{log_count}", os.path.join(logs_path, log_count), f"Entropy_{log_count}.log", False)
-    logger.info(f"Entropy : {get_entropy(x)}")
-    return get_entropy(x)
-
 
 class BasicBlock(nn.Module):
     expansion = 1
@@ -84,14 +73,10 @@ class BasicBlock(nn.Module):
 
         out = self.conv1(x)
         out = self.bn1(out)
-        print(f"After BN1 vector's shape : {out.shape}")
-        get_entropy_logger(out)
         out = self.relu(out)
 
         out = self.conv2(out)
         out = self.bn2(out)
-        print(f"After BN2 vector's shape : {out.shape}")
-        get_entropy_logger(out)
 
         if self.downsample is not None:
             identity = self.downsample(x)
@@ -127,23 +112,12 @@ class Bottleneck(nn.Module):
 
         out = self.conv1(x)
         out = self.bn1(out)
-
-        print(f"After BN1 vector's shape : {out.shape}")
-        get_entropy_logger(out)
-
         out = self.relu(out)
         out = self.conv2(out)
         out = self.bn2(out)
-
-        print(f"After BN2 vector's shape : {out.shape}")
-        get_entropy_logger(out)
-
         out = self.relu(out)
-
         out = self.conv3(out)
         out = self.bn3(out)
-        print(f"After BN3 vector's shape : {out.shape}")
-        get_entropy_logger(out)
 
         if self.downsample is not None:
             identity = self.downsample(x)
@@ -163,6 +137,9 @@ class ResNet(nn.Module):
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
         self._norm_layer = norm_layer
+
+        self.entropies = []
+        self.entropy_count = 0
 
         self.inplanes = 64
         self.dilation = 1
@@ -237,10 +214,23 @@ class ResNet(nn.Module):
         x = self.relu(x)
         x = self.maxpool(x)
 
+        entropy_logger = get_logger(f"Entropy_{self.entropy_count}", "logs", f"Entropy_{self.entropy_count}.log", False)
+
         x = self.layer1(x)
+        self.entropies.append(get_entropy(x))
         x = self.layer2(x)
+        self.entropies.append(get_entropy(x))
         x = self.layer3(x)
+        self.entropies.append(get_entropy(x))
         x = self.layer4(x)
+        self.entropies.append(get_entropy(x))
+
+        for i, entropy in enumerate(self.entropies):
+            entropy_logger.info(f"Layer {i} Entropy : {entropy}")
+
+        self.entropy_count += 1
+        self.entropies = []
+
         x = self.avgpool(x)
         x = x.reshape(x.size(0), -1)
         if return_feature:
@@ -255,7 +245,7 @@ class ResNet(nn.Module):
 
         else:
             return x
-
+          
 
 def _resnet(arch, block, layers, pretrained, progress, **kwargs):
     model = ResNet(block, layers, **kwargs)
