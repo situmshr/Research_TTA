@@ -173,6 +173,7 @@ def prepare_train_dataloader(args, trset=None, sampler=None):
 
 
 def prepare_test_data(args, use_transforms=True):
+    cwd_path = os.getcwd()
     if args.corruption == 'original':
         te_transforms_local = te_transforms if use_transforms else None
     elif args.corruption in common_corruptions:
@@ -181,12 +182,14 @@ def prepare_test_data(args, use_transforms=True):
         assert False, NotImplementedError
     if not hasattr(args, 'corruption') or args.corruption == 'original':
         print('Test on the original test set')
-        validdir = os.path.join(args.data, 'val')
+        dataset_path = os.path.join(cwd_path, args.data)
+        validdir = os.path.join(dataset_path, 'val')
         teset = SelectedRotateImageFolder(validdir, te_transforms_local, original=False, rotation=False,
                                                     rotation_transform=rotation_te_transforms)
     elif args.corruption in common_corruptions:
         print('Test on %s level %d' %(args.corruption, args.level))
-        validdir = os.path.join(args.data_corruption, args.corruption, str(args.level))
+        dataset_path = os.path.join(cwd_path, args.data_corruption)
+        validdir = os.path.join(dataset_path, args.corruption, str(args.level))
         teset = SelectedRotateImageFolder(validdir, te_transforms_local, original=False, rotation=False,
                                                     rotation_transform=rotation_te_transforms)
     else:
