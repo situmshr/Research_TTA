@@ -60,7 +60,7 @@ def get_args():
     # path of data, output dir
     parser.add_argument('--data', default='/dataset/imagenet', help='path to dataset')
     parser.add_argument('--data_corruption', default='/dataset/imagenet-c', help='path to corruption dataset')
-    parser.add_argument('--output', default='/apdcephfs/private_huberyniu/etta_exps/camera_ready_debugs', help='the output directory of this experiment')
+    parser.add_argument('--output', default='./output', help='the output directory of this experiment')
 
     # general parameters, dataloader parameters
     parser.add_argument('--seed', default=2020, type=int, help='seed for initializing training. ')
@@ -171,7 +171,6 @@ if __name__ == '__main__':
             ewc_optimizer.zero_grad()
         logger.info("compute fisher matrices finished")
         del ewc_optimizer
-
         optimizer = torch.optim.SGD(params, 0.00025, momentum=0.9)
         adapt_model = eata.EATA(subnet, optimizer, fishers, args.fisher_alpha, e_margin=args.e_margin, d_margin=args.d_margin)
     else:
