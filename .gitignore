@@ -18,6 +18,9 @@ log_processer.py
 # output files
 output/
 
+# data files
+data/
+
 # Distribution / packaging
 .Python
 build/
