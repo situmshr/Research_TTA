@@ -1,152 +1,133 @@
-from logging import debug
 import os
-import shutil
-import time
-import argparse
-import json
-import random
-import math
-
-from utils.utils import get_logger
-from utils.cli_utils import *
-from dataset.selectedRotateImageFolder import prepare_test_data
-
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
-import torch.backends.cudnn as cudnn
+from omegaconf import DictConfig, OmegaConf
+import hydra
 
-import torchvision
-import torchvision.transforms as transforms
+from models.Res import ResNetCifar  # Your custom model definition
 
-import numpy as np
+# Import the data preparation functions
+from experiments.dataset.selectedRotateImageFolder import prepare_train_data, prepare_test_data
 
-from models.Res import ResNetCifar as Resnet
-
-torch.manual_seed(1)
-NORM = ((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
-
+# Set device
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-best_acc = 0  # best test accuracy
-start_epoch = 0  # start from epoch 0 or last checkpoint epoch
+def get_net(cfg: DictConfig):
+    """
+    Load an original model checkpoint (without the desired activation type),
+    then create a new model with cfg.act_type and copy matching weights.
+    """
+    ori_net = ResNetCifar(26, 1, 10, 3, nn.BatchNorm2d)
+    checkpoint = torch.load(cfg.ori_model_path, map_location='cpu')
+    ori_net.load_state_dict(checkpoint['net'])
+    
+    # Create new model with desired activation type
+    net = ResNetCifar(26, 1, 10, 3, nn.BatchNorm2d, act_type=cfg.act_type)
+    net_state = net.state_dict()
+    for name, param in ori_net.state_dict().items():
+        if name in net_state:
+            net_state[name].copy_(param)
+    net.load_state_dict(net_state)
+    return net.to(device)
 
-# Arguments
-def get_args():
+def get_frelu_params(net):
+    """
+    Return parameters whose names contain "frelu".
+    """
+    return [param for name, param in net.named_parameters() if "frelu" in name]
 
-    parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
-
-    parser.add_argument("--dataset", type=str, default="cifar10")
-
-    parser.add_argument('--lr', default=0.1, type=float, help='learning rate')
-    parser.add_argument('--resume', '-r', action='store_true', help='resume from checkpoint')
-    parser.add_argument("--batch_size", type=int, default=128)
-    parser.add_argument("--act_type", type=str, default="relu")
-
-    return parser.parse_args()
-
-
-# Training
-def train(args):
-    transform_train = transforms.Compose([
-        transforms.RandomCrop(32, padding=4),
-        transforms.RandomHorizontalFlip(),
-        transforms.ToTensor(),
-        transforms.Normalize(*NORM),
-    ])
-
-    transform_test = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize(*NORM),
-    ])
-
-    trainset = torchvision.datasets.CIFAR10(
-        root='./data', train=True, download=True, transform=transform_train)
-    trainloader = torch.utils.data.DataLoader(
-        trainset, batch_size=128, shuffle=True, num_workers=2)
-
-    testset = torchvision.datasets.CIFAR10(
-        root='./data', train=False, download=True, transform=transform_test)
-    testloader = torch.utils.data.DataLoader(
-        testset, batch_size=100, shuffle=False, num_workers=2)
-
-    classes = ('plane', 'car', 'bird', 'cat', 'deer',
-            'dog', 'frog', 'horse', 'ship', 'truck')
-
-    net = Resnet(26, 1, 10, 3, nn.BatchNorm2d, args.act_type).to(device)
-
-    if args.resume:
-        # Load checkpoint.
-        print('==> Resuming from checkpoint..')
-        assert os.path.isdir('checkpoint'), 'Error: no checkpoint directory found!'
-        checkpoint = torch.load('./checkpoint/ckpt.pth')
-        net.load_state_dict(checkpoint['net'])
-        best_acc = checkpoint['acc']
-        start_epoch = checkpoint['epoch']
-
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.SGD(net.parameters(), lr=args.lr,
-                        momentum=0.9, weight_decay=5e-4)
-    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[50, 65], gamma=0.1, last_epoch=-1)
-
-    for epoch in range(start_epoch, start_epoch+75):
-        print('\nEpoch: %d' % epoch)
-        print(f"Learning rate: {optimizer.param_groups[0]['lr']}")
-
-        net.train()
-        train_loss = 0
-        correct = 0
-        total = 0
-        for batch_idx, (inputs, targets) in enumerate(trainloader):
-            inputs, targets = inputs.to(device), targets.to(device)
-            optimizer.zero_grad()
+def test_model(net, testloader):
+    """
+    Evaluate the network on the test dataset.
+    """
+    net.eval()
+    correct, total = 0, 0
+    with torch.no_grad():
+        for inputs, labels in testloader:
+            inputs, labels = inputs.to(device), labels.to(device)
             outputs = net(inputs)
-            loss = criterion(outputs, targets)
+            _, predicted = outputs.max(1)
+            total += labels.size(0)
+            correct += predicted.eq(labels).sum().item()
+    acc = 100 * correct / total
+    print(f"Test Accuracy: {acc:.2f}%")
+    return acc
+
+def warm_up(cfg: DictConfig, net):
+    """
+    Fine-tune only the FReLU parameters using the training data.
+    """
+    _, trainloader = prepare_train_data(cfg)
+    _, testloader = prepare_test_data(cfg)
+    
+    criterion = nn.CrossEntropyLoss()
+    frelu_params = get_frelu_params(net)
+    optimizer = optim.SGD(frelu_params, lr=cfg.lr, momentum=0.9, weight_decay=5e-4)
+    scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[10, 15], gamma=0.1)
+    
+    for epoch in range(cfg.warmup_epochs):
+        net.train()
+        for inputs, labels in trainloader:
+            inputs, labels = inputs.to(device), labels.to(device)
+            optimizer.zero_grad()
+            loss = criterion(net(inputs), labels)
             loss.backward()
             optimizer.step()
-
-            train_loss += loss.item()
-            _, predicted = outputs.max(1)
-            total += targets.size(0)
-            correct += predicted.eq(targets).sum().item()
-
-        net.eval()
-        test_loss = 0
-        correct = 0
-        total = 0
-        with torch.no_grad():
-            for batch_idx, (inputs, targets) in enumerate(testloader):
-                inputs, targets = inputs.to(device), targets.to(device)
-                outputs = net(inputs)
-                loss = criterion(outputs, targets)
-
-                test_loss += loss.item()
-                _, predicted = outputs.max(1)
-                total += targets.size(0)
-                correct += predicted.eq(targets).sum().item()
-
-        # Save checkpoint.
-        acc = correct/total
-        print(f"Accuracy: {100.*acc}")
-
-        if acc > best_acc:
-            print('Saving..')
-            state = {
-                'net': net.state_dict(),
-                'acc': acc,
-                'epoch': epoch,
-            }
-            if not os.path.isdir('checkpoint'):
-                os.mkdir('checkpoint')
-            if not args.frelu:
-                torch.save(state, './checkpoint/ckpt.pth')
-            else:
-                torch.save(state, './checkpoint/frelu_ckpt.pth')
-            best_acc = acc
-
+        acc = test_model(net, testloader)
         scheduler.step()
+        print(f"Warm-up Epoch {epoch+1}/{cfg.warmup_epochs}, Test Acc: {acc:.2f}%")
+    return net
+
+def full_train(cfg: DictConfig, net):
+    """
+    Train all network parameters using the full training loop.
+    """
+    _, trainloader = prepare_train_data(cfg)
+    _, testloader = prepare_test_data(cfg)
+    
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.SGD(net.parameters(), lr=cfg.lr, momentum=0.9, weight_decay=5e-4)
+    scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=cfg.milestones, gamma=0.1)
+    
+    for epoch in range(cfg.epochs):
+        net.train()
+        epoch_loss = 0.0
+        for inputs, labels in trainloader:
+            inputs, labels = inputs.to(device), labels.to(device)
+            optimizer.zero_grad()
+            loss = criterion(net(inputs), labels)
+            loss.backward()
+            optimizer.step()
+            epoch_loss += loss.item()
+        epoch_loss /= len(trainloader)
+        print(f"Epoch {epoch+1}/{cfg.epochs}, Train Loss: {epoch_loss:.4f}")
+        acc = test_model(net, testloader)
+        scheduler.step()
+    return net
+
+@hydra.main(config_path="conf", config_name="config_train")
+def main(cfg: DictConfig):
+    print(OmegaConf.to_yaml(cfg))
+    torch.manual_seed(cfg.seed)
+    
+    if cfg.mode == "warmup":
+        net = get_net(cfg)
+        net = warm_up(cfg, net)
+        ckpt_name = f"warm_up_{cfg.act_type}_ckpt.pth"
+    elif cfg.mode == "train":
+        # Instantiate a new model for full training (from scratch or random initialization)
+        net = ResNetCifar(26, 1, 10, 3, nn.BatchNorm2d, act_type=cfg.act_type).to(device)
+        net = full_train(cfg, net)
+        ckpt_name = f"full_train_{cfg.act_type}_ckpt.pth"
+    else:
+        raise Exception(f"Unknown mode: {cfg.mode}")
+    
+    ckpt_dir = os.path.join(cfg.out_f, cfg.dataset)
+    os.makedirs(ckpt_dir, exist_ok=True)
+    ckpt_path = os.path.join(ckpt_dir, ckpt_name)
+    torch.save({'net': net.state_dict()}, ckpt_path)
+    print(f"Checkpoint saved to {ckpt_path}")
 
 if __name__ == '__main__':
-    args = get_args()
-    train(args)
+    main()

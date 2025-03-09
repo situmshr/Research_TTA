@@ -1,0 +1,31 @@
+hydra:
+  # Set the output directory for a single run to outputs/<dataset>/<timestamp>
+  run:
+    dir: logs/${dataset}/${now:%Y-%m-%d_%H-%M-%S}
+  # Set the output directory for multirun (when using the -m option) to multirun/<dataset>/<timestamp>
+  sweep:
+    dir: logs/${dataset}/${now:%Y-%m-%d_%H-%M-%S}
+
+data:
+  input: data
+
+output_dir: output/${dataset}/${now:%Y-%m-%d_%H-%M-%S}
+
+seed: 2020
+gpu: 1
+dataset: "cifar10"
+corruption: "none"
+level: 5
+workers: 2
+algorithm: "source"
+batch_size: 64
+act_type: "relu"
+learning_rate: 0.005
+momentum: 0.9
+shuffle: true
+random_params: false
+readapt: false
+ext_flag: false
+act_flag: false
+bn_flag: false
+frelu_update_params: "none"

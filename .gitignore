@@ -9,6 +9,13 @@ __pycache__/
 # checkpoint files
 *.ckpt
 *.pth
+*.pdf
+
+# sub files
+sub*
+
+# scripts
+*.sh
 
 # log files
 logs/
@@ -20,6 +27,10 @@ output/
 
 # data files
 data/
+
+# main files
+main.*
+eata.*
 
 # Distribution / packaging
 .Python
