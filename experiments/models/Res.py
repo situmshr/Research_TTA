@@ -124,16 +124,17 @@ class ResNetCifar(nn.Module):
         self.inplanes = 16
         if act_type == "frelu":
             self.layer1 = self._make_layer_frelu(norm_layer, 16 * width)
+            self.layer2 = self._make_layer_frelu(norm_layer, 32 * width, stride=2)
+            self.layer3 = self._make_layer_frelu(norm_layer, 64 * width, stride=2)
         elif act_type == "prelu":
             self.layer1 = self._make_layer_prelu(norm_layer, 16 * width)
             self.layer2 = self._make_layer_prelu(norm_layer, 32 * width, stride=2)
             self.layer3 = self._make_layer_prelu(norm_layer, 64 * width, stride=2)
         else:    
-            self.layer1 = self._make_layer(norm_layer, 16 * width) 
-        
-        if act_type != "prelu":
+            self.layer1 = self._make_layer(norm_layer, 16 * width)
             self.layer2 = self._make_layer(norm_layer, 32 * width, stride=2)
             self.layer3 = self._make_layer(norm_layer, 64 * width, stride=2)
+
         self.bn = norm_layer(64 * width)
         self.relu = nn.ReLU(inplace=True)
         self.avgpool = nn.AvgPool2d(8)
@@ -186,4 +187,3 @@ class ResNetCifar(nn.Module):
         x = x.view(x.size(0), -1)
         x = self.fc(x)
         return x
-        

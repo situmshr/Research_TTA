@@ -1,0 +1,22 @@
+hydra:
+  # Set the output directory for a single run to logs/<dataset>/<timestamp>
+  run:
+    dir: logs/${dataset}/${now:%Y-%m-%d_%H-%M-%S}
+  # Set the output directory for multirun (when using the -m option) to logs/<dataset>/<timestamp>
+  sweep:
+    dir: logs/${dataset}/${now:%Y-%m-%d_%H-%M-%S}
+
+dataset: "cifar10"
+data_dir: "./data"
+output_dir: "./checkpoint"
+mode : "train"
+lr: 0.1
+batch_size: 128
+act_type: "relu"
+epochs: 75
+seed: 1
+milestones: [50, 65]
+
+# Additional parameters for warm-up mode
+ori_model_path: "./checkpoint/relu_ckpt.pth"
+warmup_epochs: 5                                          

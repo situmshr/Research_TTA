@@ -1,0 +1,7 @@
+algorithm_types: ["source", "tent"]
+activations: ["relu", "prelu", "frelu"]
+update_params: ["", "bn", "act", "bn_act", "ext"]
+readapt_or_not: ["", "readapt"]
+
+# additional settings
+output_dir: ../output
